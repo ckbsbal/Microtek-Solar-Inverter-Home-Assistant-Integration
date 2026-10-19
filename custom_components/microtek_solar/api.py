@@ -95,7 +95,7 @@ class MicrotekSolarApi:
             connector = aiohttp.TCPConnector(force_close=True, enable_cleanup_closed=True)
             self._session = aiohttp.ClientSession(
                 connector=connector,
-                timeout=aiohttp.ClientTimeout(total=10),
+                timeout=aiohttp.ClientTimeout(sock_connect=3, total=6),
             )
         return self._session
 
@@ -104,7 +104,7 @@ class MicrotekSolarApi:
         if self._session and not self._session.closed:
             await self._session.close()
 
-    async def _raw_get(self, relative_path: str, retries: int = 3) -> str:
+    async def _raw_get(self, relative_path: str, retries: int = 2) -> str:
         """Perform raw GET request with retries."""
         url = f"http://{self.host}/{relative_path}"
         headers = {
@@ -126,7 +126,7 @@ class MicrotekSolarApi:
                 )
                 if attempt == retries - 1:
                     raise
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.3)
         return ""
 
     async def async_authenticate(self) -> bool:

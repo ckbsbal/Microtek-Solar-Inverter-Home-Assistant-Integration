@@ -33,6 +33,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     coordinator = MicrotekDataUpdateCoordinator(
         hass=hass,
+        entry=entry,
         api=api,
         update_interval=scan_interval,
     )

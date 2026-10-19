@@ -1,4 +1,4 @@
-"""Sensor platform for Microtek Solar Inverter integration."""
+"""Sensor platform for Microtek Solar Inverter integration with offline night handling."""
 
 from dataclasses import dataclass
 import logging
@@ -19,6 +19,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -65,6 +66,7 @@ SENSOR_TYPES: tuple[MicrotekSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfPower.WATT,
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:solar-power",
         value_fn=lambda data: _extract_number(_get_info_item(data, "currentPower")),
     ),
     MicrotekSensorEntityDescription(
@@ -73,6 +75,7 @@ SENSOR_TYPES: tuple[MicrotekSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         state_class=SensorStateClass.TOTAL_INCREASING,
+        icon="mdi:calendar-today",
         value_fn=lambda data: _extract_number(_get_info_item(data, "yieldToday")),
     ),
     MicrotekSensorEntityDescription(
@@ -81,6 +84,7 @@ SENSOR_TYPES: tuple[MicrotekSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         state_class=SensorStateClass.TOTAL_INCREASING,
+        icon="mdi:counter",
         value_fn=lambda data: _extract_number(_get_info_item(data, "totalYield")),
     ),
     MicrotekSensorEntityDescription(
@@ -88,6 +92,7 @@ SENSOR_TYPES: tuple[MicrotekSensorEntityDescription, ...] = (
         name="Rated Power",
         native_unit_of_measurement=UnitOfPower.WATT,
         device_class=SensorDeviceClass.POWER,
+        icon="mdi:flash",
         value_fn=lambda data: _extract_number(_get_info_item(data, "ratedPower")),
     ),
     MicrotekSensorEntityDescription(
@@ -122,8 +127,10 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class MicrotekSensor(CoordinatorEntity[MicrotekDataUpdateCoordinator], SensorEntity):
-    """Representation of a Microtek Solar Sensor."""
+class MicrotekSensor(
+    CoordinatorEntity[MicrotekDataUpdateCoordinator], RestoreEntity, SensorEntity
+):
+    """Representation of a Microtek Solar Sensor with offline night preservation."""
 
     entity_description: MicrotekSensorEntityDescription
 
@@ -137,10 +144,11 @@ class MicrotekSensor(CoordinatorEntity[MicrotekDataUpdateCoordinator], SensorEnt
         super().__init__(coordinator)
         self.entity_description = description
         self._entry = entry
+        self._last_value: Any = None
 
-        inverter = coordinator.data.get("inverter", {})
-        device = coordinator.data.get("device", {})
-        serial = inverter.get("serialNum") or device.get("deviceSerialNum") or entry.entry_id
+        serial = str(entry.unique_id or entry.entry_id)
+        inverter = coordinator.data.get("inverter", {}) if coordinator.data else {}
+        sw_version = inverter.get("mainVersion", "8351-0116")
 
         self._attr_unique_id = f"{serial}_{description.key}"
         self._attr_name = f"Microtek Solar {description.name}"
@@ -150,13 +158,80 @@ class MicrotekSensor(CoordinatorEntity[MicrotekDataUpdateCoordinator], SensorEnt
             name="Microtek Solar Inverter",
             manufacturer="Microtek / Deye OEM",
             model="MTK GTI 3kW D11",
-            sw_version=inverter.get("mainVersion", "8351-0116"),
-            configuration_url=f"http://{entry.data.get('host', '192.168.1.16')}",
+            sw_version=sw_version,
+            configuration_url=f"http://{entry.data.get('host', '192.168.1.x')}",
         )
+
+    async def async_added_to_hass(self) -> None:
+        """Handle entity which will be added, restoring previous state if available."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state not in (None, "unknown", "unavailable"):
+            try:
+                self._last_value = float(last_state.state)
+            except ValueError:
+                self._last_value = last_state.state
+
+    @property
+    def available(self) -> bool:
+        """Return True even when inverter is asleep/offline at night."""
+        return True
 
     @property
     def native_value(self) -> Any:
-        """Return the state of the sensor."""
-        if not self.coordinator.data:
-            return None
-        return self.entity_description.value_fn(self.coordinator.data)
+        """Return the state of the sensor. Realtime output shows 0 at night; yields retain last values."""
+        is_online = (
+            self.coordinator.data.get("online", True)
+            if self.coordinator.data
+            else False
+        )
+
+        # Real-time power output is explicitly 0 W when inverter is asleep/offline
+        if self.entity_description.key == "current_power":
+            if not is_online:
+                return 0.0
+
+        if self.coordinator.data:
+            val = self.entity_description.value_fn(self.coordinator.data)
+            if val is not None:
+                self._last_value = val
+                return val
+
+        # Retain last known value for daily yields, lifetime yields, and rated power
+        if self._last_value is not None:
+            return self._last_value
+
+        if self.entity_description.key == "current_power":
+            return 0.0
+
+        return None
+
+    @property
+    def icon(self) -> Optional[str]:
+        """Return dynamic icon indicating online or night/offline state."""
+        is_online = (
+            self.coordinator.data.get("online", True)
+            if self.coordinator.data
+            else False
+        )
+        if not is_online:
+            if self.entity_description.key == "current_power":
+                return "mdi:weather-night"
+            if self.entity_description.key in ("daily_production", "total_production"):
+                return "mdi:solar-power-variant-outline"
+            if self.entity_description.key == "wifi_signal":
+                return "mdi:wifi-off"
+        return self.entity_description.icon
+
+    @property
+    def extra_state_attributes(self) -> Dict[str, Any]:
+        """Return device state attributes."""
+        is_online = (
+            self.coordinator.data.get("online", True)
+            if self.coordinator.data
+            else False
+        )
+        return {
+            "device_status": "online" if is_online else "offline",
+            "night_mode": not is_online,
+        }
