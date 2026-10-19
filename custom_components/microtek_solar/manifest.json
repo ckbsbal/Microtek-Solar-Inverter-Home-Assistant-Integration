@@ -1,0 +1,11 @@
+{
+  "domain": "microtek_solar",
+  "name": "Microtek Solar Inverter",
+  "codeowners": ["@ChandanSamanta"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/example/microtek_solar",
+  "iot_class": "local_polling",
+  "requirements": ["cryptography>=38.0.0"],
+  "version": "1.0.0"
+}

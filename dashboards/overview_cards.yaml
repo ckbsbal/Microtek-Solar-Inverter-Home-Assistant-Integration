@@ -1,0 +1,38 @@
+# Microtek Solar Inverter - Overview Dashboard Cards (YAML)
+# Add this horizontal stack to your primary Lovelace dashboard
+
+type: horizontal-stack
+cards:
+  - type: gauge
+    name: Live Solar Power
+    entity: sensor.microtek_solar_inverter_microtek_solar_current_power
+    min: 0
+    max: 3000
+    needle: true
+    severity:
+      green: 1500
+      yellow: 600
+      red: 0
+  - type: vertical-stack
+    cards:
+      - type: tile
+        entity: sensor.microtek_solar_inverter_microtek_solar_current_power
+        name: Realtime Output
+        icon: mdi:solar-power
+        color: amber
+        state_content:
+          - state
+      - type: tile
+        entity: sensor.microtek_solar_inverter_microtek_solar_daily_production
+        name: Today's Yield
+        icon: mdi:calendar-today
+        color: green
+        state_content:
+          - state
+      - type: tile
+        entity: sensor.microtek_solar_inverter_microtek_solar_total_production
+        name: Total Lifetime Yield
+        icon: mdi:counter
+        color: blue
+        state_content:
+          - state

@@ -1,0 +1,24 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Microtek Solar Inverter",
+        "description": "Enter the connection details for your Microtek solar inverter WiFi logger.",
+        "data": {
+          "host": "IP Address",
+          "username": "Web UI Username",
+          "password": "Web UI Password",
+          "scan_interval": "Update Interval (seconds)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the inverter logger. Verify IP address.",
+      "invalid_auth": "Invalid username or password for inverter web UI.",
+      "unknown": "Unexpected error occurred during communication."
+    },
+    "abort": {
+      "already_configured": "This Microtek solar inverter is already configured."
+    }
+  }
+}

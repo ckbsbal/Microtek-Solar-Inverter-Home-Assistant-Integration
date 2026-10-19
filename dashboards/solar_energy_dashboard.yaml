@@ -1,0 +1,65 @@
+# Dedicated Solar Energy Dashboard (Sections Layout)
+title: Solar Energy
+views:
+  - title: Solar Overview
+    path: solar-overview
+    icon: mdi:solar-power-variant
+    type: sections
+    max_columns: 3
+    sections:
+      - title: Live Power & Generation
+        cards:
+          - type: gauge
+            name: Current Output
+            entity: sensor.microtek_solar_inverter_microtek_solar_current_power
+            min: 0
+            max: 3000
+            needle: true
+            severity:
+              green: 1500
+              yellow: 600
+              red: 0
+          - type: tile
+            entity: sensor.microtek_solar_inverter_microtek_solar_current_power
+            name: Realtime Power
+            color: amber
+            icon: mdi:flash
+            state_content:
+              - state
+          - type: tile
+            entity: sensor.microtek_solar_inverter_microtek_solar_daily_production
+            name: Today's Yield
+            color: green
+            icon: mdi:calendar-today
+            state_content:
+              - state
+          - type: tile
+            entity: sensor.microtek_solar_inverter_microtek_solar_total_production
+            name: Lifetime Generation
+            color: blue
+            icon: mdi:counter
+            state_content:
+              - state
+      - title: Solar Production History
+        cards:
+          - type: history-graph
+            title: 24-Hour Power Curve
+            hours_to_show: 24
+            entities:
+              - entity: sensor.microtek_solar_inverter_microtek_solar_current_power
+                name: Solar Output (W)
+      - title: Inverter Diagnostics & Status
+        cards:
+          - type: entities
+            title: Device Health
+            entities:
+              - entity: sensor.microtek_solar_inverter_microtek_solar_rated_power
+                name: Rated Capacity
+              - entity: binary_sensor.microtek_solar_inverter_microtek_solar_cloud_connected
+                name: Cloud Sync
+              - entity: binary_sensor.microtek_solar_inverter_microtek_solar_fault_alert
+                name: Fault Alert
+              - entity: sensor.microtek_solar_inverter_microtek_solar_alert_count
+                name: Active Alert Codes
+              - entity: sensor.microtek_solar_inverter_microtek_solar_wifi_signal_level
+                name: WiFi Signal Strength
