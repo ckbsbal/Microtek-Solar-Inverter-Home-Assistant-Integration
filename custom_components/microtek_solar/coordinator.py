@@ -101,17 +101,25 @@ class MicrotekDataUpdateCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
         try:
             data = await self.api.async_get_data()
+            if not self.is_online:
+                _LOGGER.info("Microtek solar inverter connected and ONLINE")
             data["online"] = True
             self.is_online = True
             self._cached_data = data
             await self._async_save_cache(data)
             return data
         except Exception as err:
+            if self.is_online:
+                _LOGGER.warning(
+                    "Microtek solar inverter went OFFLINE: %s (falling back to night/cached telemetry)",
+                    err,
+                )
+            else:
+                _LOGGER.debug(
+                    "Microtek inverter offline/unreachable (%s). Device is asleep (night mode).",
+                    err,
+                )
             self.is_online = False
-            _LOGGER.debug(
-                "Microtek inverter offline/unreachable (%s). Device is asleep (night mode).",
-                err,
-            )
 
             if self._cached_data is None:
                 self._cached_data = await self._async_load_cache()

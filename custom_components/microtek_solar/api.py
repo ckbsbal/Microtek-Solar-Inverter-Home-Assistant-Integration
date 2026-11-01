@@ -95,18 +95,26 @@ class MicrotekSolarApi:
             connector = aiohttp.TCPConnector(force_close=True, enable_cleanup_closed=True)
             self._session = aiohttp.ClientSession(
                 connector=connector,
-                timeout=aiohttp.ClientTimeout(sock_connect=3, total=6),
+                timeout=aiohttp.ClientTimeout(sock_connect=4, total=8),
             )
         return self._session
 
+    async def _reset_session(self) -> None:
+        """Close existing session so next request creates a fresh TCP connection."""
+        if self._session and not self._session.closed:
+            try:
+                await self._session.close()
+            except Exception:
+                pass
+        self._session = None
+
     async def close(self) -> None:
         """Close session if owned."""
-        if self._session and not self._session.closed:
-            await self._session.close()
+        await self._reset_session()
 
     async def _raw_get(self, relative_path: str, retries: int = 2) -> str:
         """Perform raw GET request with retries."""
-        url = f"http://{self.host}/{relative_path}"
+        url = f"http://{self.host}/{relative_path.lstrip('/')}"
         headers = {
             "User-Agent": "Mozilla/5.0 (HomeAssistant)",
             "Connection": "close",
@@ -124,14 +132,18 @@ class MicrotekSolarApi:
                     retries,
                     err,
                 )
+                await self._reset_session()
                 if attempt == retries - 1:
                     raise
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.5)
         return ""
 
     async def async_authenticate(self) -> bool:
         """Exchange RSA/AES session key and log in."""
         _LOGGER.debug("Authenticating with Microtek inverter at %s", self.host)
+        self._authenticated = False
+        self._session_key = None
+        await self._reset_session()
 
         # 1. Fetch RSA Public Key or fallback to static key
         pem_bytes = STATIC_PUBLIC_KEY.encode()
@@ -152,6 +164,9 @@ class MicrotekSolarApi:
         enc_key = public_key.encrypt(session_key.encode("utf-8"), padding.PKCS1v15())
         enc_key_b64 = base64.b64encode(enc_key).decode("ascii")
 
+        # Brief delay to allow embedded RTOS to process
+        await asyncio.sleep(0.2)
+
         # 3. Send session key
         send_url = f"send.cgi?key={enc_key_b64}&t={random.random()}"
         send_path = base64.b64encode(send_url.encode()).decode()
@@ -162,7 +177,7 @@ class MicrotekSolarApi:
         self._session_key = session_key
 
         # 4. Login
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.3)
         login_url = (
             f"login.cgi?user={self.username}&password={self.password}&t={random.random()}"
         )
@@ -171,6 +186,7 @@ class MicrotekSolarApi:
         login_resp = _aes_decrypt(login_resp_raw, session_key)
 
         if "login_success" not in login_resp:
+            self._session_key = None
             raise PermissionError(f"Login failed on {self.host}. Check credentials.")
 
         self._authenticated = True
@@ -185,26 +201,33 @@ class MicrotekSolarApi:
         status_url = f"status.cgi?t={random.random()}"
         status_path = _aes_encrypt(status_url, self._session_key)
 
+        needs_reauth = False
+        dec_resp = ""
         try:
             raw_resp = await self._raw_get(status_path)
             dec_resp = _aes_decrypt(raw_resp, self._session_key)
+            if "token_timeout" in dec_resp or "json_start" not in dec_resp:
+                needs_reauth = True
         except Exception as err:
-            _LOGGER.warning("Error fetching status, attempting re-auth: %s", err)
-            await self.async_authenticate()
-            status_path = _aes_encrypt(status_url, self._session_key)
-            raw_resp = await self._raw_get(status_path)
-            dec_resp = _aes_decrypt(raw_resp, self._session_key)
+            _LOGGER.debug("Error fetching status (%s), will re-authenticate", err)
+            needs_reauth = True
 
-        # Check for token timeout or invalid output
-        if "token_timeout" in dec_resp or "json_start" not in dec_resp:
-            _LOGGER.info("Session expired, re-authenticating...")
+        if needs_reauth:
+            self._authenticated = False
+            self._session_key = None
+            await self._reset_session()
+            await asyncio.sleep(0.5)
             await self.async_authenticate()
+
+            status_url = f"status.cgi?t={random.random()}"
             status_path = _aes_encrypt(status_url, self._session_key)
             raw_resp = await self._raw_get(status_path)
             dec_resp = _aes_decrypt(raw_resp, self._session_key)
 
         parsed = _extract_json(dec_resp)
         if not parsed:
+            self._authenticated = False
+            self._session_key = None
             raise ValueError(f"Invalid status response received: {dec_resp[:100]}")
 
         return parsed
